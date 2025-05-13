@@ -25,10 +25,10 @@ class ServerData:
             f.write(json.dumps(self.text))
 
 
-d = ServerData('0.0.0.0', 8765)
+d = ServerData('localhost', 8765)
 
 
-async def handle_msg(websocket: WebSocketServerProtocol):
+async def handle_msg(websocket: WebSocketServerProtocol,path):
     username = None
     try:
         auth_data = await websocket.recv()
@@ -37,14 +37,14 @@ async def handle_msg(websocket: WebSocketServerProtocol):
         password = auth.get("password")
 
         if not username or not password:
-            await websocket.send(json.dumps({"error": "需要用户名和密码"}))
+            await websocket.send(json.dumps({"state":"error","error": "需要用户名和密码"}))
             await websocket.close()
             return
 
         # 注册或验证用户
         if username in d.users_dic:
             if d.users_dic[username] != password:
-                await websocket.send(json.dumps({"error": "密码错误"}))
+                await websocket.send(json.dumps({"state":"error","error": "密码错误"}))
                 await websocket.close()
                 return
         else:
@@ -61,19 +61,20 @@ async def handle_msg(websocket: WebSocketServerProtocol):
             del d.online_users[username]
 
         d.online_users[username] = websocket
+        d.save_all()
         follows = d.users_rela[username]
-        follows = [username] + follows
         titles = []
         for i in follows:
             titles.append(d.text[i]["title"])
-        await websocket.send(json.dumps({"status": "登录成功", "follow": follows, "title": titles}))
+        await websocket.send(json.dumps({"state": "登录成功", "follow": follows, "title": titles}))
         async for msg in websocket:
             data = json.loads(msg)
             if data["type"] == "update":
                 if not (username in d.text):
                     d.text[username] = {"title": "", "questions": [], "answers": []}
+                    d.users_rela=[username]+d.users_rela
                 d.text[username]["title"] = data["title"]
-                await websocket.send(json.dumps({"status": "更新/创建成功"}))
+                await websocket.send(json.dumps({"state": "更新/创建成功"}))
             elif data["type"] == "request":
                 if data["box"] in d.text:
                     questions = d.text[data["box"]]["questions"]
@@ -84,7 +85,7 @@ async def handle_msg(websocket: WebSocketServerProtocol):
                             {"state": "请求成功", "question": questions[data["question_index"]],
                              "answer": d.text[data["box"]]["answers"][data["question_index"]]}))
                 else:
-                    await websocket.send(json.dumps({"error": "请求对象不存在"}))
+                    await websocket.send(json.dumps({"state":"error","error": "请求对象不存在"}))
             elif data["type"] == "submit":
                 if "box" in data:
                     box = data["box"]
@@ -100,14 +101,18 @@ async def handle_msg(websocket: WebSocketServerProtocol):
             elif data["type"] == "follow":
                 box = data["box"]
                 if box in d.users_rela[username]:
-                    await websocket.send(json.dumps({"error": "已订阅"}))
+                    await websocket.send(json.dumps({"state":"error","error": "已订阅"}))
                 else:
                     d.users_rela[username].append(box)
                     await websocket.send(json.dumps({"state": "订阅成功"}))
+            elif data["type"]=="test":
+                print("test mode")
+                await websocket.send(json.dumps({"state": "测试成功"}))
             else:
-                await websocket.send(json.dumps({"error": "无效的JSON格式"}))
+                await websocket.send(json.dumps({"state":"error","error": "无效的JSON格式"}))
+            d.save_all()
     except json.JSONDecodeError:
-        await websocket.send(json.dumps({"error": "无效的JSON格式"}))
+        await websocket.send(json.dumps({"state":"error","error": "无效的JSON格式"}))
     finally:
         if username and d.online_users.get(username) == websocket:
             del d.online_users[username]
