@@ -28,92 +28,102 @@ class ServerData:
 d = ServerData('localhost', 8765)
 
 
-async def handle_msg(websocket: WebSocketServerProtocol,path):
+async def handle_msg(websocket: WebSocketServerProtocol, path):
     username = None
     try:
-        auth_data = await websocket.recv()
-        auth = json.loads(auth_data)
-        username = auth.get("username")
-        password = auth.get("password")
-
-        if not username or not password:
-            await websocket.send(json.dumps({"state":"error","error": "需要用户名和密码"}))
-            await websocket.close()
-            return
-
-        # 注册或验证用户
-        if username in d.users_dic:
-            if d.users_dic[username] != password:
-                await websocket.send(json.dumps({"state":"error","error": "密码错误"}))
-                await websocket.close()
-                return
-        else:
-            d.users_dic[username] = password
-            d.users_rela[username] = []
-
-        # 处理重复登录
-        if username in d.online_users:
-            old_connection = d.online_users[username]
-            try:
-                await old_connection.close()
-            except Exception:
-                pass
-            del d.online_users[username]
-
-        d.online_users[username] = websocket
-        d.save_all()
-        follows = d.users_rela[username]
-        titles = []
-        for i in follows:
-            titles.append(d.text[i]["title"])
-        await websocket.send(json.dumps({"state": "登录成功", "follow": follows, "title": titles}))
         async for msg in websocket:
+            print(msg)
             data = json.loads(msg)
-            if data["type"] == "update":
-                if not (username in d.text):
-                    d.text[username] = {"title": "", "questions": [], "answers": []}
-                    d.users_rela=[username]+d.users_rela
-                d.text[username]["title"] = data["title"]
-                await websocket.send(json.dumps({"state": "更新/创建成功"}))
-            elif data["type"] == "request":
-                if data["box"] in d.text:
-                    questions = d.text[data["box"]]["questions"]
-                    if not ("question_index" in data):
-                        await websocket.send(json.dumps({"state": "请求成功", "question": questions}))
+            if username is None:
+                if data.get("type") == "login":
+                    username = data.get("username")
+                    password = data.get("password")
+                    if not username or not password:
+                        await websocket.send(json.dumps({"state": "error", "error": "Need username or password"}))
+                        await websocket.close()
+                        return
+
+                    # 注册或验证用户
+                    if username in d.users_dic:
+                        if d.users_dic[username] != password:
+                            await websocket.send(json.dumps({"state": "error", "error": "Wrong password"}))
+                            await websocket.close()
+                            return
                     else:
-                        await websocket.send(json.dumps(
-                            {"state": "请求成功", "question": questions[data["question_index"]],
-                             "answer": d.text[data["box"]]["answers"][data["question_index"]]}))
+                        d.users_dic[username] = password
+                        d.users_rela[username] = []
+
+                    # 处理重复登录
+                    if username in d.online_users:
+                        old_connection = d.online_users[username]
+                        try:
+                            await old_connection.close()
+                        except Exception:
+                            pass
+                        del d.online_users[username]
+
+                    d.online_users[username] = websocket
+                    d.save_all()
+                    follows = d.users_rela[username]
+                    titles = []
+                    for i in follows:
+                        titles.append(d.text[i]["title"])
+                    await websocket.send(json.dumps({"state": "success", "follow": follows, "title": titles}))
                 else:
-                    await websocket.send(json.dumps({"state":"error","error": "请求对象不存在"}))
-            elif data["type"] == "submit":
-                if "box" in data:
-                    box = data["box"]
-                    question = data["question"]
-                    d.text[box]["questions"].appand(question)
-                    d.text[box]["answers"].appand("")
-                    if not (box in d.users_rela[username]):
-                        d.users_rela[username].append(box)
-                else:
-                    index = data["question_index"]
-                    d.text[username]["answers"][index] = data["answer"]
-                await websocket.send(json.dumps({"state": "提交成功"}))
-            elif data["type"] == "follow":
-                box = data["box"]
-                if box in d.users_rela[username]:
-                    await websocket.send(json.dumps({"state":"error","error": "已订阅"}))
-                else:
-                    d.users_rela[username].append(box)
-                    await websocket.send(json.dumps({"state": "订阅成功"}))
-            elif data["type"]=="test":
-                print("test mode")
-                await websocket.send(json.dumps({"state": "测试成功"}))
+                    await websocket.send(json.dumps({"state": "error", "error": "Invalid JSON format"}))
             else:
-                await websocket.send(json.dumps({"state":"error","error": "无效的JSON格式"}))
-            d.save_all()
+                if data.get("type") == "update":
+                    if not (username in d.text):
+                        d.text[username] = {"title": "", "questions": [], "answers": []}
+                        d.users_rela = [username] + d.users_rela
+                    d.text[username]["title"] = data.get("title")
+                    await websocket.send(json.dumps({"state": "success"}))
+                elif data.get("type") == "request":
+                    if data.get("box") in d.text:
+                        questions = d.text[data.get("box")]["questions"]
+                        if data.get("question") is None:
+                            await websocket.send(json.dumps({"state": "success", "question": questions}))
+                        else:
+                            await websocket.send(json.dumps(
+                                {"state": "success", "question": questions[data.get("question_index")],
+                                 "answer": d.text[data.get("box")]["answers"][int(data.get("question_index"))]}))
+                    else:
+                        await websocket.send(
+                            json.dumps({"state": "error", "error": "The requested object does not exist."}))
+                elif data.get("type") == "submit":
+                    if "box" in data:
+                        box = data.get("box")
+                        question = data.get("question")
+                        d.text[box]["questions"].appand(question)
+                        d.text[box]["answers"].appand("")
+                        if not (box in d.users_rela[username]):
+                            d.users_rela[username].append(box)
+                    else:
+                        index = data.get("question_index")
+                        d.text[username]["answers"][index] = data.get("answer")
+                    await websocket.send(json.dumps({"state": "success"}))
+                elif data.get("type") == "follow":
+                    box = data["box"]
+                    if box in d.users_rela[username]:
+                        await websocket.send(json.dumps({"state": "error", "error": "Already subscribed"}))
+                    else:
+                        d.users_rela[username].append(box)
+                        await websocket.send(json.dumps({"state": "success"}))
+                elif data.get("type") == "test":
+                    print("test mode")
+                    await websocket.send(json.dumps({"state": "success"}))
+                elif data.get("type") == "logout":
+                    d.save_all()
+                    del d.online_users[username]
+                    username = None
+                    await websocket.send(json.dumps({"state": "success"}))
+                else:
+                    await websocket.send(json.dumps({"state": "error", "error": "Invalid JSON format"}))
+                d.save_all()
     except json.JSONDecodeError:
-        await websocket.send(json.dumps({"state":"error","error": "无效的JSON格式"}))
+        await websocket.send(json.dumps({"state": "error", "error": "Invalid JSON format"}))
     finally:
+        print("finally")
         if username and d.online_users.get(username) == websocket:
             del d.online_users[username]
 
