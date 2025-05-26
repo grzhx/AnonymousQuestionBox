@@ -64,18 +64,14 @@ async def handle_msg(websocket: WebSocketServerProtocol, path):
 
                     d.online_users[username] = websocket
                     d.save_all()
-                    follows = d.users_rela[username]
-                    titles = []
-                    for i in follows:
-                        titles.append(d.text[i]["title"])
-                    await websocket.send(json.dumps({"state": "success", "follow": follows, "title": titles}))
+                    await websocket.send(json.dumps({"state": "success"}))
                 else:
                     await websocket.send(json.dumps({"state": "error", "error": "Invalid JSON format"}))
             else:
                 if data.get("type") == "update":
                     if not (username in d.text):
                         d.text[username] = {"title": "", "questions": [], "answers": []}
-                        d.users_rela = [username] + d.users_rela
+                        d.users_rela[username] = [username] + d.users_rela[username]
                     d.text[username]["title"] = data.get("title")
                     await websocket.send(json.dumps({"state": "success"}))
                 elif data.get("type") == "request":
@@ -88,27 +84,43 @@ async def handle_msg(websocket: WebSocketServerProtocol, path):
                                 {"state": "success", "question": questions[data.get("question_index")],
                                  "answer": d.text[data.get("box")]["answers"][int(data.get("question_index"))]}))
                     else:
-                        await websocket.send(
-                            json.dumps({"state": "error", "error": "The requested object does not exist."}))
+                        follows = d.users_rela[username]
+                        titles = []
+                        qs = []
+                        ans = []
+                        for i in follows:
+                            titles.append(d.text[i]["title"])
+                            qs.append(d.text[i]["questions"])
+                            ans.append(d.text[i]["answers"])
+                        await websocket.send(json.dumps(
+                            {"state": "success", "follows": follows, "titles": titles, "questions": qs,
+                             "answers": ans}))
                 elif data.get("type") == "submit":
                     if "box" in data:
                         box = data.get("box")
-                        question = data.get("question")
-                        d.text[box]["questions"].appand(question)
-                        d.text[box]["answers"].appand("")
-                        if not (box in d.users_rela[username]):
-                            d.users_rela[username].append(box)
+                        if box in d.text:
+                            question = data.get("question")
+                            d.text[box]["questions"].append(question)
+                            d.text[box]["answers"].append("")
+                            if not (box in d.users_rela[username]):
+                                d.users_rela[username].append(box)
+                            await websocket.send(json.dumps({"state": "success"}))
+                        else:
+                            await websocket.send(json.dumps({"state": "error", "error": "box don't exist"}))
                     else:
                         index = data.get("question_index")
-                        d.text[username]["answers"][index] = data.get("answer")
-                    await websocket.send(json.dumps({"state": "success"}))
-                elif data.get("type") == "follow":
-                    box = data["box"]
-                    if box in d.users_rela[username]:
-                        await websocket.send(json.dumps({"state": "error", "error": "Already subscribed"}))
-                    else:
-                        d.users_rela[username].append(box)
+                        d.text.get(username).get("answers")[index] = data.get("answer")
                         await websocket.send(json.dumps({"state": "success"}))
+                elif data.get("type") == "follow":
+                    box = data.get("box")
+                    if box in d.text:
+                        if box in d.users_rela[username]:
+                            await websocket.send(json.dumps({"state": "error", "error": "Already subscribed"}))
+                        else:
+                            d.users_rela[username].append(box)
+                            await websocket.send(json.dumps({"state": "success"}))
+                    else:
+                        await websocket.send(json.dumps({"state": "error", "error": "Do not exist"}))
                 elif data.get("type") == "test":
                     print("test mode")
                     await websocket.send(json.dumps({"state": "success"}))
@@ -123,7 +135,9 @@ async def handle_msg(websocket: WebSocketServerProtocol, path):
     except json.JSONDecodeError:
         await websocket.send(json.dumps({"state": "error", "error": "Invalid JSON format"}))
     finally:
-        print("finally")
+        d.save_all()
+        if username:
+            print(username + " lose connection")
         if username and d.online_users.get(username) == websocket:
             del d.online_users[username]
 
