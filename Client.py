@@ -94,21 +94,10 @@ class Client:
             self._background_tasks.add(self._heartbeat_task)
 
     async def close(self):
+        await self.logout()
         if self.websocket:
             await self.websocket.close()
             self.websocket = None
-        for task in self._background_tasks:
-            task.cancel()
-        try:
-            await asyncio.wait(
-                self._background_tasks,
-                timeout=10.0,
-                return_when=asyncio.ALL_COMPLETED
-            )
-        except asyncio.TimeoutError:
-            print("partial task timeout")
-        finally:
-            self._background_tasks.clear()
 
     async def logout(self):
         await self._send_message({"type": "logout"})
